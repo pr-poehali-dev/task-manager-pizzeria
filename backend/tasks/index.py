@@ -75,7 +75,7 @@ def handler(event: dict, context) -> dict:
 
 def _users(conn):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(f'SELECT id, name, role, color FROM {S}.users ORDER BY name')
+        cur.execute(f'SELECT id, name, role, color, branch FROM {S}.users ORDER BY name')
         rows = cur.fetchall()
     return {'statusCode': 200, 'headers': CORS, 'body': json.dumps([dict(r) for r in rows])}
 

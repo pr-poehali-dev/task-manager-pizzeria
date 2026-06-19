@@ -19,8 +19,8 @@ const TASKS_API = 'https://functions.poehali.dev/932659eb-bcfe-4df6-be7b-93e459d
 type Status = 'open' | 'done' | 'overdue';
 type Tab = 'tasks' | 'calendar' | 'checklists';
 
-interface User { id: number; name: string; email?: string; role: string; color: string; }
-interface Member { id: number; name: string; role: string; color: string; }
+interface User { id: number; name: string; email?: string; role: string; color: string; branch?: string; }
+interface Member { id: number; name: string; role: string; color: string; branch?: string; }
 interface Task {
   id: number; title: string; description: string;
   assigned_to: number | null; assignee_name: string | null; assignee_color: string | null;
@@ -74,12 +74,19 @@ const authHeaders = () => ({ 'Content-Type': 'application/json', 'X-Session-Id':
 // ═══════════════════════════════════════════════════════════════
 // Auth Screen
 // ═══════════════════════════════════════════════════════════════
+const BRANCHES = [
+  'Москва 14-1', 'Москва 14-2', 'Москва 14-3', 'Москва 14-5',
+  'Клин-1', 'Клин-2', 'Звенигород-1', 'Солнечногорск-1',
+  'Рублево-1', 'Черноголовка-1', 'Дзержинский-1', 'Нерюнгри-1', 'Нарьян-Мар-1',
+];
+
 const AuthScreen = ({ onAuth }: { onAuth: (user: User) => void }) => {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('employee');
+  const [branch, setBranch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -89,7 +96,7 @@ const AuthScreen = ({ onAuth }: { onAuth: (user: User) => void }) => {
     try {
       const body = mode === 'login'
         ? { email, password }
-        : { name, email, password, role };
+        : { name, email, password, role, branch };
       const res = await fetch(`${AUTH_API}?action=${mode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -167,15 +174,26 @@ const AuthScreen = ({ onAuth }: { onAuth: (user: User) => void }) => {
             </div>
 
             {mode === 'register' && (
-              <div className="animate-fade-in">
-                <Label className="text-xs font-semibold text-muted-foreground">Должность</Label>
-                <Select value={role} onValueChange={setRole}>
-                  <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manager">Управляющий</SelectItem>
-                    <SelectItem value="employee">Сотрудник</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="animate-fade-in space-y-4">
+                <div>
+                  <Label className="text-xs font-semibold text-muted-foreground">Подразделение</Label>
+                  <Select value={branch} onValueChange={setBranch}>
+                    <SelectTrigger className="mt-1.5"><SelectValue placeholder="Выберите пиццерию" /></SelectTrigger>
+                    <SelectContent>
+                      {BRANCHES.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs font-semibold text-muted-foreground">Должность</Label>
+                  <Select value={role} onValueChange={setRole}>
+                    <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manager">Управляющий</SelectItem>
+                      <SelectItem value="employee">Сотрудник</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
 
@@ -302,7 +320,7 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
             </div>
             <div className="leading-tight">
               <p className="text-[15px] font-extrabold tracking-tight">Корочка</p>
-              <p className="text-[11px] text-muted-foreground">Пиццерия №14 · Центр</p>
+              <p className="text-[11px] text-muted-foreground">{currentUser.branch || 'Пиццерия'}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -330,6 +348,7 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
                 <div className="px-3 py-2 text-xs text-muted-foreground border-b border-border mb-1">
                   <p className="font-semibold text-foreground">{currentUser.name}</p>
                   <p>{roleLabel}</p>
+                  {currentUser.branch && <p className="mt-0.5 text-[11px]">{currentUser.branch}</p>}
                 </div>
                 <button
                   onClick={onLogout}
@@ -598,7 +617,7 @@ const CreateDialog = ({ open, onClose, team, onCreated }: { open: boolean; onClo
               <Select value={assignee} onValueChange={setAssignee}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Выбрать" /></SelectTrigger>
                 <SelectContent>
-                  {team.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name} — {m.role === 'manager' ? 'Управляющий' : 'Сотрудник'}</SelectItem>)}
+                  {team.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name}{m.branch ? ` · ${m.branch}` : ''}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -699,7 +718,7 @@ const DetailDialog = ({ task, team, currentUser, onClose, onPatch, onChanged }: 
                 <SelectContent>
                   {team.map((m) => (
                     <SelectItem key={m.id} value={String(m.id)}>
-                      {m.name} — {m.role === 'manager' ? 'Управляющий' : 'Сотрудник'}
+                      {m.name}{m.branch ? ` · ${m.branch}` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>

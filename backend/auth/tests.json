@@ -10,21 +10,21 @@
       "name": "Register new user",
       "method": "POST",
       "path": "/?action=register",
-      "body": {"name": "Тест Тестов", "email": "test_auto@korochka.ru", "password": "test123", "role": "manager"},
+      "body": {"name": "Тест Тестов", "email": "test_auto2@korochka.ru", "password": "test123", "role": "manager", "branch": "Клин-1"},
       "expectedStatus": 200
     },
     {
       "name": "Login",
       "method": "POST",
       "path": "/?action=login",
-      "body": {"email": "test_auto@korochka.ru", "password": "test123"},
+      "body": {"email": "test_auto2@korochka.ru", "password": "test123"},
       "expectedStatus": 200
     },
     {
       "name": "Login wrong password",
       "method": "POST",
       "path": "/?action=login",
-      "body": {"email": "test_auto@korochka.ru", "password": "wrongpass"},
+      "body": {"email": "test_auto2@korochka.ru", "password": "wrongpass"},
       "expectedStatus": 401
     }
   ]

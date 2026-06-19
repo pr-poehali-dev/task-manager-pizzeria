@@ -56,14 +56,24 @@ def handler(event: dict, context) -> dict:
         conn.close()
 
 
+BRANCHES = [
+    'Москва 14-1', 'Москва 14-2', 'Москва 14-3', 'Москва 14-5',
+    'Клин-1', 'Клин-2', 'Звенигород-1', 'Солнечногорск-1',
+    'Рублево-1', 'Черноголовка-1', 'Дзержинский-1', 'Нерюнгри-1', 'Нарьян-Мар-1',
+]
+
+
 def _register(conn, data):
     name = _esc(data.get('name', '').strip())
     email = _esc(data.get('email', '').strip().lower())
     password = data.get('password', '')
     role = _esc(data.get('role', 'employee'))
+    branch = _esc(data.get('branch', '').strip())
 
     if not name or not email or not password:
         return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Заполните все поля'})}
+    if not branch:
+        return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Выберите подразделение'})}
     if len(password) < 6:
         return {'statusCode': 400, 'headers': CORS, 'body': json.dumps({'error': 'Пароль минимум 6 символов'})}
 
@@ -78,9 +88,9 @@ def _register(conn, data):
 
         pw_hash = _hash(password)
         cur.execute(f"""
-            INSERT INTO {S}.users (name, email, password_hash, role, color)
-            VALUES ('{name}', '{email}', '{pw_hash}', '{role}', '{color}')
-            RETURNING id, name, email, role, color
+            INSERT INTO {S}.users (name, email, password_hash, role, color, branch)
+            VALUES ('{name}', '{email}', '{pw_hash}', '{role}', '{color}', '{branch}')
+            RETURNING id, name, email, role, color, branch
         """)
         user = dict(cur.fetchone())
 
@@ -103,7 +113,7 @@ def _login(conn, data):
 
     pw_hash = _hash(password)
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(f"SELECT id, name, email, role, color FROM {S}.users WHERE email = '{email}' AND password_hash = '{pw_hash}'")
+        cur.execute(f"SELECT id, name, email, role, color, branch FROM {S}.users WHERE email = '{email}' AND password_hash = '{pw_hash}'")
         user = cur.fetchone()
         if not user:
             return {'statusCode': 401, 'headers': CORS, 'body': json.dumps({'error': 'Неверный email или пароль'})}
@@ -129,7 +139,7 @@ def _get_user_by_session(cur, session_id):
     if not session_id:
         return None
     cur.execute(f"""
-        SELECT u.id, u.name, u.email, u.role, u.color
+        SELECT u.id, u.name, u.email, u.role, u.color, u.branch
         FROM {S}.sessions s
         JOIN {S}.users u ON u.id = s.user_id
         WHERE s.id = '{_esc(session_id)}' AND s.expires_at > NOW()
@@ -151,6 +161,6 @@ def _users(conn, session_id):
         user = _get_user_by_session(cur, session_id)
         if not user:
             return {'statusCode': 401, 'headers': CORS, 'body': json.dumps({'error': 'unauthorized'})}
-        cur.execute(f"SELECT id, name, role, color FROM {S}.users ORDER BY name")
+        cur.execute(f"SELECT id, name, role, color, branch FROM {S}.users ORDER BY name")
         rows = cur.fetchall()
     return {'statusCode': 200, 'headers': CORS, 'body': json.dumps([dict(r) for r in rows])}
