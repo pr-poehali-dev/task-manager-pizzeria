@@ -122,7 +122,7 @@ const AuthScreen = ({ onAuth }: { onAuth: (user: User) => void }) => {
             <Icon name="Pizza" size={28} />
           </div>
           <div className="text-center">
-            <p className="text-2xl font-extrabold tracking-tight">Корочка</p>
+            <p className="text-2xl font-extrabold tracking-tight">Корка</p>
             <p className="text-sm text-muted-foreground">Таск-менеджер для пиццерий</p>
           </div>
         </div>
@@ -336,7 +336,7 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
               <Icon name="Pizza" size={20} />
             </div>
             <div className="leading-tight">
-              <p className="text-[15px] font-extrabold tracking-tight">Корочка</p>
+              <p className="text-[15px] font-extrabold tracking-tight">Корка</p>
               <p className="text-[11px] text-muted-foreground">{currentUser.branch || 'Пиццерия'}</p>
             </div>
           </div>
