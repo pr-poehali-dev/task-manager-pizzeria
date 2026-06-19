@@ -263,6 +263,7 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
   const [tab, setTab] = useState<Tab>('tasks');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>('all');
   const [filterPerson, setFilterPerson] = useState<string>('all');
+  const [filterBranch, setFilterBranch] = useState<string>(currentUser.branch || 'all');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [team, setTeam] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -292,19 +293,35 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
     await fetch(TASKS_API, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ id, ...body }) });
   };
 
+  const branchMembers = useMemo(
+    () => filterBranch === 'all' ? team : team.filter((m) => m.branch === filterBranch),
+    [team, filterBranch]
+  );
+
+  const branchMemberIds = useMemo(
+    () => new Set(branchMembers.map((m) => m.id)),
+    [branchMembers]
+  );
+
   const filtered = useMemo(
     () => tasks.filter((t) => {
+      const okBranch = filterBranch === 'all' || (t.assigned_to !== null && branchMemberIds.has(t.assigned_to)) || t.assigned_to === null && filterBranch === 'all';
       const okStatus = filterStatus === 'all' || effectiveStatus(t) === filterStatus;
       const okPerson = filterPerson === 'all' || String(t.assigned_to) === filterPerson;
-      return okStatus && okPerson;
+      return okBranch && okStatus && okPerson;
     }),
-    [tasks, filterStatus, filterPerson]
+    [tasks, filterStatus, filterPerson, filterBranch, branchMemberIds]
+  );
+
+  const branchTasks = useMemo(
+    () => filterBranch === 'all' ? tasks : tasks.filter((t) => t.assigned_to !== null && branchMemberIds.has(t.assigned_to)),
+    [tasks, filterBranch, branchMemberIds]
   );
 
   const stats = {
-    open: tasks.filter((t) => effectiveStatus(t) === 'open').length,
-    overdue: tasks.filter((t) => effectiveStatus(t) === 'overdue').length,
-    done: tasks.filter((t) => effectiveStatus(t) === 'done').length,
+    open: branchTasks.filter((t) => effectiveStatus(t) === 'open').length,
+    overdue: branchTasks.filter((t) => effectiveStatus(t) === 'overdue').length,
+    done: branchTasks.filter((t) => effectiveStatus(t) === 'done').length,
   };
 
   const roleLabel = currentUser.role === 'manager' ? 'Управляющий' : 'Сотрудник';
@@ -371,6 +388,12 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
             Ни одна задача<br className="hidden sm:block" /> не потеряется
           </h1>
+          {filterBranch !== 'all' && (
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
+              <Icon name="MapPin" size={13} />
+              {filterBranch}
+            </div>
+          )}
         </div>
 
         {/* Stats */}
@@ -416,14 +439,28 @@ const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () 
         {/* Tasks tab */}
         {!loading && tab === 'tasks' && (
           <div className="animate-fade-in">
+            {/* Branch filter row */}
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Icon name="MapPin" size={14} className="text-muted-foreground" />
+              <FilterChip active={filterBranch === 'all'} onClick={() => { setFilterBranch('all'); setFilterPerson('all'); }}>
+                Все точки
+              </FilterChip>
+              {BRANCHES.map((b) => (
+                <FilterChip key={b} active={filterBranch === b} onClick={() => { setFilterBranch(b); setFilterPerson('all'); }}>
+                  {b}
+                </FilterChip>
+              ))}
+            </div>
+
+            {/* Status + person filter row */}
             <div className="mb-5 flex flex-wrap items-center gap-2">
-              <FilterChip active={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>Все</FilterChip>
+              <FilterChip active={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>Все статусы</FilterChip>
               <FilterChip active={filterStatus === 'open'} onClick={() => setFilterStatus('open')}>В работе</FilterChip>
               <FilterChip active={filterStatus === 'overdue'} onClick={() => setFilterStatus('overdue')}>Просрочено</FilterChip>
               <FilterChip active={filterStatus === 'done'} onClick={() => setFilterStatus('done')}>Выполнено</FilterChip>
               <span className="mx-1 h-5 w-px bg-border" />
               <FilterChip active={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Все</FilterChip>
-              {team.map((p) => (
+              {branchMembers.map((p) => (
                 <FilterChip key={p.id} active={filterPerson === String(p.id)} onClick={() => setFilterPerson(String(p.id))}>
                   {p.name}
                 </FilterChip>
