@@ -1,0 +1,31 @@
+{
+  "tests": [
+    {
+      "name": "CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Register new user",
+      "method": "POST",
+      "path": "/?action=register",
+      "body": {"name": "Тест Тестов", "email": "test_auto@korochka.ru", "password": "test123", "role": "manager"},
+      "expectedStatus": 200
+    },
+    {
+      "name": "Login",
+      "method": "POST",
+      "path": "/?action=login",
+      "body": {"email": "test_auto@korochka.ru", "password": "test123"},
+      "expectedStatus": 200
+    },
+    {
+      "name": "Login wrong password",
+      "method": "POST",
+      "path": "/?action=login",
+      "body": {"email": "test_auto@korochka.ru", "password": "wrongpass"},
+      "expectedStatus": 401
+    }
+  ]
+}

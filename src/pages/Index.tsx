@@ -11,38 +11,25 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
+import { Toaster } from '@/components/ui/toaster';
 
-const API = 'https://functions.poehali.dev/932659eb-bcfe-4df6-be7b-93e459da0209';
+const AUTH_API = 'https://functions.poehali.dev/e520e2bc-a6ce-4344-887a-7e30ff1082b2';
+const TASKS_API = 'https://functions.poehali.dev/932659eb-bcfe-4df6-be7b-93e459da0209';
 
 type Status = 'open' | 'done' | 'overdue';
 type Tab = 'tasks' | 'calendar' | 'checklists';
 
-interface Member {
-  id: number;
-  name: string;
-  role: string;
-  color: string;
-}
-
+interface User { id: number; name: string; email?: string; role: string; color: string; }
+interface Member { id: number; name: string; role: string; color: string; }
 interface Task {
-  id: number;
-  title: string;
-  description: string;
-  assignee_id: number | null;
-  assignee_name: string | null;
-  assignee_color: string | null;
-  due_at: string | null;
-  status: Status;
-  comments: number;
+  id: number; title: string; description: string;
+  assigned_to: number | null; assignee_name: string | null; assignee_color: string | null;
+  created_by: number | null; creator_name: string | null;
+  due_at: string | null; status: Status; comments: number;
 }
+interface Comment { id: number; author: string; text: string; created_at: string; }
 
-interface Comment {
-  id: number;
-  author: string;
-  text: string;
-  created_at: string;
-}
-
+const SESSION_KEY = 'korochka_session';
 const initials = (n: string) => n.split(' ').map((p) => p[0]).join('').slice(0, 2);
 
 const STATUS_META: Record<Status, { label: string; cls: string; dot: string }> = {
@@ -61,11 +48,10 @@ const fmtDue = (iso: string | null) => {
   if (!iso) return 'Без срока';
   const d = new Date(iso);
   const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
   const yest = new Date(now); yest.setDate(now.getDate() - 1);
   const tom = new Date(now); tom.setDate(now.getDate() + 1);
   const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-  if (sameDay) return `Сегодня · ${time}`;
+  if (d.toDateString() === now.toDateString()) return `Сегодня · ${time}`;
   if (d.toDateString() === yest.toDateString()) return `Вчера · ${time}`;
   if (d.toDateString() === tom.toDateString()) return `Завтра · ${time}`;
   return `${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })} · ${time}`;
@@ -79,7 +65,183 @@ const CHECKLISTS = [
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
+// ── Auth helpers ──────────────────────────────────────────────
+const getSession = () => localStorage.getItem(SESSION_KEY) || '';
+const setSession = (id: string) => localStorage.setItem(SESSION_KEY, id);
+const clearSession = () => localStorage.removeItem(SESSION_KEY);
+const authHeaders = () => ({ 'Content-Type': 'application/json', 'X-Session-Id': getSession() });
+
+// ═══════════════════════════════════════════════════════════════
+// Auth Screen
+// ═══════════════════════════════════════════════════════════════
+const AuthScreen = ({ onAuth }: { onAuth: (user: User) => void }) => {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('employee');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const body = mode === 'login'
+        ? { email, password }
+        : { name, email, password, role };
+      const res = await fetch(`${AUTH_API}?action=${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Ошибка'); return; }
+      setSession(data.session_id);
+      onAuth(data.user);
+    } catch {
+      setError('Нет соединения с сервером');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md animate-scale-in">
+        {/* Logo */}
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg">
+            <Icon name="Pizza" size={28} />
+          </div>
+          <div className="text-center">
+            <p className="text-2xl font-extrabold tracking-tight">Корочка</p>
+            <p className="text-sm text-muted-foreground">Таск-менеджер для пиццерий</p>
+          </div>
+        </div>
+
+        {/* Card */}
+        <div className="rounded-3xl border border-border bg-card p-8 shadow-sm">
+          {/* Tab switcher */}
+          <div className="mb-6 flex rounded-full border border-border bg-background p-1">
+            {(['login', 'register'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setError(''); }}
+                className={`flex-1 rounded-full py-2 text-sm font-semibold transition-all ${
+                  mode === m ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {m === 'login' ? 'Войти' : 'Регистрация'}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-4">
+            {mode === 'register' && (
+              <div className="animate-fade-in">
+                <Label className="text-xs font-semibold text-muted-foreground">Ваше имя</Label>
+                <Input
+                  value={name} onChange={(e) => setName(e.target.value)}
+                  placeholder="Анна Иванова" className="mt-1.5"
+                />
+              </div>
+            )}
+
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground">Email</Label>
+              <Input
+                type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                placeholder="anna@pizza.ru" className="mt-1.5"
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+              />
+            </div>
+
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground">Пароль</Label>
+              <Input
+                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                placeholder="Минимум 6 символов" className="mt-1.5"
+                onKeyDown={(e) => e.key === 'Enter' && submit()}
+              />
+            </div>
+
+            {mode === 'register' && (
+              <div className="animate-fade-in">
+                <Label className="text-xs font-semibold text-muted-foreground">Должность</Label>
+                <Select value={role} onValueChange={setRole}>
+                  <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manager">Управляющий</SelectItem>
+                    <SelectItem value="employee">Сотрудник</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {error && (
+              <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <Icon name="CircleAlert" size={15} />
+                {error}
+              </div>
+            )}
+
+            <Button onClick={submit} disabled={loading} className="w-full rounded-full py-5 font-bold text-base">
+              {loading
+                ? <><Icon name="LoaderCircle" size={17} className="mr-2 animate-spin" />Подождите…</>
+                : mode === 'login' ? 'Войти' : 'Создать аккаунт'
+              }
+            </Button>
+          </div>
+        </div>
+
+        <p className="mt-5 text-center text-xs text-muted-foreground">
+          Ваши данные надёжно защищены
+        </p>
+      </div>
+      <Toaster />
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Main App
+// ═══════════════════════════════════════════════════════════════
 const Index = () => {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Restore session on mount
+  useEffect(() => {
+    const sid = getSession();
+    if (!sid) { setAuthChecked(true); return; }
+    fetch(`${AUTH_API}?action=me`, { headers: { 'X-Session-Id': sid } })
+      .then((r) => r.json())
+      .then((data) => { if (data.id) setCurrentUser(data); else clearSession(); })
+      .catch(() => clearSession())
+      .finally(() => setAuthChecked(false));
+    setAuthChecked(true);
+  }, []);
+
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <Icon name="LoaderCircle" size={28} className="animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <AuthScreen onAuth={(u) => setCurrentUser(u)} />;
+  }
+
+  return <Dashboard currentUser={currentUser} onLogout={() => { clearSession(); setCurrentUser(null); }} />;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Dashboard
+// ═══════════════════════════════════════════════════════════════
+const Dashboard = ({ currentUser, onLogout }: { currentUser: User; onLogout: () => void }) => {
   const [tab, setTab] = useState<Tab>('tasks');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>('all');
   const [filterPerson, setFilterPerson] = useState<string>('all');
@@ -91,7 +253,11 @@ const Index = () => {
 
   const load = useCallback(async () => {
     try {
-      const [tRes, mRes] = await Promise.all([fetch(API), fetch(`${API}?resource=team`)]);
+      const [tRes, mRes] = await Promise.all([
+        fetch(TASKS_API, { headers: authHeaders() }),
+        fetch(`${TASKS_API}?resource=users`, { headers: authHeaders() }),
+      ]);
+      if (tRes.status === 401) { onLogout(); return; }
       setTasks(await tRes.json());
       setTeam(await mRes.json());
     } catch {
@@ -99,24 +265,19 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [onLogout]);
 
   useEffect(() => { load(); }, [load]);
 
   const patch = async (id: number, body: Record<string, unknown>) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, ...body } as Task : t)));
-    await fetch(API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ...body }) });
-  };
-
-  const toggleDone = (t: Task) => {
-    const next: Status = effectiveStatus(t) === 'done' ? 'open' : 'done';
-    patch(t.id, { status: next });
+    await fetch(TASKS_API, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ id, ...body }) });
   };
 
   const filtered = useMemo(
     () => tasks.filter((t) => {
       const okStatus = filterStatus === 'all' || effectiveStatus(t) === filterStatus;
-      const okPerson = filterPerson === 'all' || t.assignee_name === filterPerson;
+      const okPerson = filterPerson === 'all' || String(t.assigned_to) === filterPerson;
       return okStatus && okPerson;
     }),
     [tasks, filterStatus, filterPerson]
@@ -128,8 +289,11 @@ const Index = () => {
     done: tasks.filter((t) => effectiveStatus(t) === 'done').length,
   };
 
+  const roleLabel = currentUser.role === 'manager' ? 'Управляющий' : 'Сотрудник';
+
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* Header */}
       <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <div className="flex items-center gap-2.5">
@@ -150,22 +314,47 @@ const Index = () => {
                 </span>
               )}
             </button>
-            <Avatar className="h-9 w-9 border border-border">
-              <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">УП</AvatarFallback>
-            </Avatar>
+            {/* User menu */}
+            <div className="group relative">
+              <button className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 transition-colors hover:bg-secondary">
+                <Avatar className="h-6 w-6">
+                  <AvatarFallback className={`text-[9px] font-bold text-white ${currentUser.color}`}>
+                    {initials(currentUser.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="hidden text-xs font-semibold sm:block">{currentUser.name}</span>
+                <Icon name="ChevronDown" size={13} className="text-muted-foreground" />
+              </button>
+              {/* Dropdown */}
+              <div className="invisible absolute right-0 top-full mt-1 w-52 rounded-2xl border border-border bg-card p-1 shadow-lg opacity-0 transition-all group-hover:visible group-hover:opacity-100">
+                <div className="px-3 py-2 text-xs text-muted-foreground border-b border-border mb-1">
+                  <p className="font-semibold text-foreground">{currentUser.name}</p>
+                  <p>{roleLabel}</p>
+                </div>
+                <button
+                  onClick={onLogout}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  <Icon name="LogOut" size={15} />
+                  Выйти
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-5 pb-24 pt-8">
         <div className="animate-fade-in mb-8">
-          <p className="mb-1 text-sm font-medium text-primary">Добрый день, управляющий</p>
+          <p className="mb-1 text-sm font-medium text-primary">
+            Добрый день, {currentUser.name.split(' ')[0]}
+          </p>
           <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-            Ни одна задача
-            <br className="hidden sm:block" /> не потеряется
+            Ни одна задача<br className="hidden sm:block" /> не потеряется
           </h1>
         </div>
 
+        {/* Stats */}
         <div className="mb-9 grid grid-cols-3 gap-3">
           {[
             { label: 'В работе', value: stats.open, icon: 'Clock', tint: 'text-amber-600' },
@@ -180,15 +369,14 @@ const Index = () => {
           ))}
         </div>
 
+        {/* Tabs */}
         <div className="mb-6 inline-flex rounded-full border border-border bg-card p-1">
           {([
             { id: 'tasks', label: 'Задачи', icon: 'ListChecks' },
             { id: 'calendar', label: 'Календарь', icon: 'CalendarDays' },
             { id: 'checklists', label: 'Чек-листы', icon: 'ClipboardCheck' },
           ] as { id: Tab; label: string; icon: string }[]).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
+            <button key={t.id} onClick={() => setTab(t.id)}
               className={`flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-semibold transition-all sm:px-5 ${
                 tab === t.id ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               }`}
@@ -206,6 +394,7 @@ const Index = () => {
           </div>
         )}
 
+        {/* Tasks tab */}
         {!loading && tab === 'tasks' && (
           <div className="animate-fade-in">
             <div className="mb-5 flex flex-wrap items-center gap-2">
@@ -214,23 +403,34 @@ const Index = () => {
               <FilterChip active={filterStatus === 'overdue'} onClick={() => setFilterStatus('overdue')}>Просрочено</FilterChip>
               <FilterChip active={filterStatus === 'done'} onClick={() => setFilterStatus('done')}>Выполнено</FilterChip>
               <span className="mx-1 h-5 w-px bg-border" />
-              <FilterChip active={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Все исполнители</FilterChip>
+              <FilterChip active={filterPerson === 'all'} onClick={() => setFilterPerson('all')}>Все</FilterChip>
               {team.map((p) => (
-                <FilterChip key={p.id} active={filterPerson === p.name} onClick={() => setFilterPerson(p.name)}>{p.name}</FilterChip>
+                <FilterChip key={p.id} active={filterPerson === String(p.id)} onClick={() => setFilterPerson(String(p.id))}>
+                  {p.name}
+                </FilterChip>
               ))}
-              <Button size="sm" className="ml-auto rounded-full font-semibold" onClick={() => setCreateOpen(true)}>
-                <Icon name="Plus" size={16} className="mr-1" />
-                Новая задача
-              </Button>
+              {currentUser.role === 'manager' && (
+                <Button size="sm" className="ml-auto rounded-full font-semibold" onClick={() => setCreateOpen(true)}>
+                  <Icon name="Plus" size={16} className="mr-1" />
+                  Новая задача
+                </Button>
+              )}
             </div>
 
             <div className="space-y-3">
               {filtered.map((t) => {
                 const status = effectiveStatus(t);
                 const meta = STATUS_META[status];
+                const isAssignedToMe = t.assigned_to === currentUser.id;
                 return (
-                  <div key={t.id} className="group flex items-start gap-4 rounded-2xl border border-border bg-card p-4 transition-all hover:border-primary/30 hover:shadow-sm sm:p-5">
-                    <Checkbox checked={status === 'done'} onCheckedChange={() => toggleDone(t)} className="mt-1 h-5 w-5 rounded-full" />
+                  <div key={t.id}
+                    className="group flex items-start gap-4 rounded-2xl border border-border bg-card p-4 transition-all hover:border-primary/30 hover:shadow-sm sm:p-5"
+                  >
+                    <Checkbox
+                      checked={status === 'done'}
+                      onCheckedChange={() => patch(t.id, { status: status === 'done' ? 'open' : 'done' })}
+                      className="mt-1 h-5 w-5 rounded-full"
+                    />
                     <div className="min-w-0 flex-1 cursor-pointer" onClick={() => setDetail(t)}>
                       <div className="flex flex-wrap items-center gap-2">
                         <p className={`font-semibold ${status === 'done' ? 'text-muted-foreground line-through' : ''}`}>{t.title}</p>
@@ -238,17 +438,28 @@ const Index = () => {
                           <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
                           {meta.label}
                         </Badge>
+                        {isAssignedToMe && (
+                          <Badge variant="secondary" className="rounded-full border-0 bg-primary/10 text-[11px] font-medium text-primary">
+                            Моя задача
+                          </Badge>
+                        )}
                       </div>
                       {t.description && <p className="mt-0.5 text-sm text-muted-foreground">{t.description}</p>}
                       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1.5">
                           <Avatar className="h-5 w-5">
-                            <AvatarFallback className={`text-[9px] font-bold text-white ${t.assignee_color || 'bg-muted-foreground'}`}>
-                              {t.assignee_name ? initials(t.assignee_name) : '—'}
+                            <AvatarFallback className={`text-[9px] font-bold text-white ${t.assignee_color || 'bg-slate-400'}`}>
+                              {t.assignee_name ? initials(t.assignee_name) : '?'}
                             </AvatarFallback>
                           </Avatar>
                           {t.assignee_name || 'Не назначен'}
                         </span>
+                        {t.creator_name && (
+                          <span className="flex items-center gap-1">
+                            <Icon name="UserPen" size={13} />
+                            {t.creator_name}
+                          </span>
+                        )}
                         <span className={`flex items-center gap-1 ${status === 'overdue' ? 'font-medium text-red-500' : ''}`}>
                           <Icon name="Clock" size={13} />
                           {fmtDue(t.due_at)}
@@ -259,7 +470,9 @@ const Index = () => {
                         </span>
                       </div>
                     </div>
-                    <button onClick={() => setDetail(t)} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground opacity-0 transition-all hover:bg-secondary group-hover:opacity-100" title="Открыть">
+                    <button onClick={() => setDetail(t)}
+                      className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground opacity-0 transition-all hover:bg-secondary group-hover:opacity-100"
+                    >
                       <Icon name="ChevronRight" size={18} />
                     </button>
                   </div>
@@ -279,22 +492,23 @@ const Index = () => {
 
         {tab === 'checklists' && (
           <div className="animate-fade-in grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {CHECKLISTS.map((cl, idx) => (
-              <ChecklistCard key={cl.title} data={cl} delay={idx * 80} />
-            ))}
+            {CHECKLISTS.map((cl, idx) => <ChecklistCard key={cl.title} data={cl} delay={idx * 80} />)}
           </div>
         )}
       </main>
 
-      <CreateDialog open={createOpen} onClose={() => setCreateOpen(false)} team={team} onCreated={load} />
-      <DetailDialog task={detail} team={team} onClose={() => setDetail(null)} onPatch={patch} onChanged={load} />
+      {currentUser.role === 'manager' && (
+        <CreateDialog open={createOpen} onClose={() => setCreateOpen(false)} team={team} onCreated={load} />
+      )}
+      <DetailDialog task={detail} team={team} currentUser={currentUser} onClose={() => setDetail(null)} onPatch={patch} onChanged={load} />
+      <Toaster />
     </div>
   );
 };
 
+// ── Filter chip ───────────────────────────────────────────────
 const FilterChip = ({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) => (
-  <button
-    onClick={onClick}
+  <button onClick={onClick}
     className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all ${
       active ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:text-foreground'
     }`}
@@ -303,6 +517,7 @@ const FilterChip = ({ active, onClick, children }: { active: boolean; onClick: (
   </button>
 );
 
+// ── Calendar ──────────────────────────────────────────────────
 const CalendarView = ({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => void }) => {
   const now = new Date();
   const month = now.getMonth();
@@ -312,14 +527,10 @@ const CalendarView = ({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => v
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-bold capitalize">{monthName}</h2>
-      </div>
+      <div className="mb-4"><h2 className="text-lg font-bold capitalize">{monthName}</h2></div>
       <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="grid grid-cols-7 border-b border-border">
-          {WEEKDAYS.map((d) => (
-            <div key={d} className="py-2.5 text-center text-xs font-semibold text-muted-foreground">{d}</div>
-          ))}
+          {WEEKDAYS.map((d) => <div key={d} className="py-2.5 text-center text-xs font-semibold text-muted-foreground">{d}</div>)}
         </div>
         <div className="grid grid-cols-7">
           {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
@@ -347,25 +558,24 @@ const CalendarView = ({ tasks, onOpen }: { tasks: Task[]; onOpen: (t: Task) => v
   );
 };
 
+// ── Create dialog (manager only) ──────────────────────────────
 const CreateDialog = ({ open, onClose, team, onCreated }: { open: boolean; onClose: () => void; team: Member[]; onCreated: () => void }) => {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
-  const [assignee, setAssignee] = useState<string>('');
+  const [assignee, setAssignee] = useState('');
   const [due, setDue] = useState('');
   const [saving, setSaving] = useState(false);
 
   const submit = async () => {
     if (!title.trim()) { toast({ title: 'Введите название задачи', variant: 'destructive' }); return; }
     setSaving(true);
-    await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, description: desc, assignee_id: assignee ? Number(assignee) : null, due_at: due ? due.replace('T', ' ') + ':00' : null }),
+    await fetch(TASKS_API, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ title, description: desc, assigned_to: assignee ? Number(assignee) : null, due_at: due ? due.replace('T', ' ') + ':00' : null }),
     });
     setSaving(false);
     setTitle(''); setDesc(''); setAssignee(''); setDue('');
-    onClose();
-    onCreated();
+    onClose(); onCreated();
     toast({ title: 'Задача создана' });
   };
 
@@ -388,7 +598,7 @@ const CreateDialog = ({ open, onClose, team, onCreated }: { open: boolean; onClo
               <Select value={assignee} onValueChange={setAssignee}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Выбрать" /></SelectTrigger>
                 <SelectContent>
-                  {team.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name}</SelectItem>)}
+                  {team.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name} — {m.role === 'manager' ? 'Управляющий' : 'Сотрудник'}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -409,8 +619,9 @@ const CreateDialog = ({ open, onClose, team, onCreated }: { open: boolean; onClo
   );
 };
 
-const DetailDialog = ({ task, team, onClose, onPatch, onChanged }: {
-  task: Task | null; team: Member[]; onClose: () => void;
+// ── Detail dialog ─────────────────────────────────────────────
+const DetailDialog = ({ task, team, currentUser, onClose, onPatch, onChanged }: {
+  task: Task | null; team: Member[]; currentUser: User; onClose: () => void;
   onPatch: (id: number, body: Record<string, unknown>) => void; onChanged: () => void;
 }) => {
   const [comments, setComments] = useState<Comment[]>([]);
@@ -420,20 +631,24 @@ const DetailDialog = ({ task, team, onClose, onPatch, onChanged }: {
   useEffect(() => {
     if (!task) return;
     setDue('');
-    fetch(`${API}?resource=comments&task_id=${task.id}`).then((r) => r.json()).then(setComments).catch(() => setComments([]));
+    fetch(`${TASKS_API}?resource=comments&task_id=${task.id}`, { headers: authHeaders() })
+      .then((r) => r.json()).then(setComments).catch(() => setComments([]));
   }, [task]);
 
   if (!task) return null;
   const status = effectiveStatus(task);
+  const isManager = currentUser.role === 'manager';
+  const isAssigned = task.assigned_to === currentUser.id;
 
   const addComment = async () => {
     if (!text.trim()) return;
-    await fetch(`${API}?resource=comments`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: task.id, text, author: 'Управляющий' }),
+    await fetch(`${TASKS_API}?resource=comments`, {
+      method: 'POST', headers: authHeaders(),
+      body: JSON.stringify({ task_id: task.id, text }),
     });
     setText('');
-    fetch(`${API}?resource=comments&task_id=${task.id}`).then((r) => r.json()).then(setComments);
+    fetch(`${TASKS_API}?resource=comments&task_id=${task.id}`, { headers: authHeaders() })
+      .then((r) => r.json()).then(setComments);
     onChanged();
   };
 
@@ -461,47 +676,63 @@ const DetailDialog = ({ task, team, onClose, onPatch, onChanged }: {
             <span className="flex items-center gap-1.5 text-muted-foreground">
               <Icon name="Clock" size={14} /> {fmtDue(task.due_at)}
             </span>
+            {task.creator_name && (
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <Icon name="UserPen" size={14} /> {task.creator_name}
+              </span>
+            )}
           </div>
 
-          <div>
-            <Label className="text-xs">Исполнитель</Label>
-            <Select
-              value={task.assignee_id ? String(task.assignee_id) : ''}
-              onValueChange={(v) => {
-                const m = team.find((x) => x.id === Number(v));
-                onPatch(task.id, { assignee_id: Number(v), assignee_name: m?.name, assignee_color: m?.color });
-                onChanged();
-              }}
-            >
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Назначить" /></SelectTrigger>
-              <SelectContent>
-                {team.map((m) => <SelectItem key={m.id} value={String(m.id)}>{m.name} · {m.role}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Assignee — manager only */}
+          {isManager && (
+            <div>
+              <Label className="text-xs">Исполнитель</Label>
+              <Select
+                value={task.assigned_to ? String(task.assigned_to) : ''}
+                onValueChange={(v) => {
+                  const m = team.find((x) => x.id === Number(v));
+                  onPatch(task.id, { assigned_to: Number(v), assignee_name: m?.name, assignee_color: m?.color });
+                  onChanged();
+                }}
+              >
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Назначить исполнителя" /></SelectTrigger>
+                <SelectContent>
+                  {team.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      {m.name} — {m.role === 'manager' ? 'Управляющий' : 'Сотрудник'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant={status === 'done' ? 'outline' : 'default'}
-              className="rounded-full font-semibold"
-              onClick={() => onPatch(task.id, { status: status === 'done' ? 'open' : 'done' })}
-            >
-              <Icon name={status === 'done' ? 'RotateCcw' : 'Check'} size={15} className="mr-1" />
-              {status === 'done' ? 'Вернуть в работу' : 'Отметить выполненной'}
-            </Button>
-          </div>
-
-          <div className="rounded-xl border border-border p-3">
-            <Label className="text-xs">Перенести срок</Label>
-            <div className="mt-1 flex gap-2">
-              <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} className="h-9" />
-              <Button size="sm" variant="outline" className="rounded-lg" onClick={reschedule}>
-                <Icon name="CalendarClock" size={15} />
+          {/* Actions — manager or assignee */}
+          {(isManager || isAssigned) && (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant={status === 'done' ? 'outline' : 'default'} className="rounded-full font-semibold"
+                onClick={() => onPatch(task.id, { status: status === 'done' ? 'open' : 'done' })}
+              >
+                <Icon name={status === 'done' ? 'RotateCcw' : 'Check'} size={15} className="mr-1" />
+                {status === 'done' ? 'Вернуть в работу' : 'Отметить выполненной'}
               </Button>
             </div>
-          </div>
+          )}
 
+          {/* Reschedule — assignee or manager */}
+          {(isManager || isAssigned) && (
+            <div className="rounded-xl border border-border p-3">
+              <Label className="text-xs">Перенести срок</Label>
+              <div className="mt-1 flex gap-2">
+                <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} className="h-9" />
+                <Button size="sm" variant="outline" className="rounded-lg" onClick={reschedule}>
+                  <Icon name="CalendarClock" size={15} />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Comments */}
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
               <Icon name="MessageSquare" size={15} /> Комментарии
@@ -516,8 +747,13 @@ const DetailDialog = ({ task, team, onClose, onPatch, onChanged }: {
               {comments.length === 0 && <p className="text-sm text-muted-foreground">Пока нет комментариев</p>}
             </div>
             <div className="mt-3 flex gap-2">
-              <Input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addComment()} placeholder="Написать комментарий…" className="h-9" />
-              <Button size="sm" className="rounded-lg" onClick={addComment}><Icon name="Send" size={15} /></Button>
+              <Input value={text} onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addComment()}
+                placeholder="Написать комментарий…" className="h-9"
+              />
+              <Button size="sm" className="rounded-lg" onClick={addComment}>
+                <Icon name="Send" size={15} />
+              </Button>
             </div>
           </div>
         </div>
@@ -526,6 +762,7 @@ const DetailDialog = ({ task, team, onClose, onPatch, onChanged }: {
   );
 };
 
+// ── Checklist card ────────────────────────────────────────────
 const ChecklistCard = ({ data, delay }: { data: { title: string; icon: string; items: string[] }; delay: number }) => {
   const [checked, setChecked] = useState<boolean[]>(data.items.map(() => false));
   const completed = checked.filter(Boolean).length;

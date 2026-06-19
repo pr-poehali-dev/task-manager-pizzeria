@@ -1,22 +1,16 @@
 {
   "tests": [
     {
-      "name": "List tasks",
-      "method": "GET",
-      "path": "/",
-      "expectedStatus": 200
-    },
-    {
-      "name": "List team",
-      "method": "GET",
-      "path": "/?resource=team",
-      "expectedStatus": 200
-    },
-    {
       "name": "CORS preflight",
       "method": "OPTIONS",
       "path": "/",
       "expectedStatus": 200
+    },
+    {
+      "name": "Unauthorized without session",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 401
     }
   ]
 }
