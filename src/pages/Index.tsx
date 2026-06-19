@@ -237,8 +237,7 @@ const Index = () => {
       .then((r) => r.json())
       .then((data) => { if (data.id) setCurrentUser(data); else clearSession(); })
       .catch(() => clearSession())
-      .finally(() => setAuthChecked(false));
-    setAuthChecked(true);
+      .finally(() => setAuthChecked(true));
   }, []);
 
   if (!authChecked) {
